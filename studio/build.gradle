@@ -139,7 +139,7 @@ dependencies {
 	implementation libs.jakarta.mail.api
 	implementation libs.tika.core
 	implementation libs.rome.utils
-	implementation platform("org.apache.groovy:groovy-bom:${groovyVersion}")
+	implementation platform("org.apache.groovy:groovy-bom:${libs.versions.groovy.get()}")
 	implementation 'org.apache.groovy:groovy-jsr223'
 
 	testImplementation project(path: ':engine', configuration: 'classes')

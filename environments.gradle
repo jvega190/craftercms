@@ -46,6 +46,11 @@ ext.commonFoldersToCreate = [
 	"/data"
 ]
 
+def groovyVersion = libs.versions.groovy.get()
+def tomcatVersion = libs.versions.tomcat.get()
+def openSearchVersion = libs.versions.opensearch.asProvider().get()
+def mariadb4jVersion = libs.versions.mariadb4j.get()
+
 ext.hostsToScan = [
 	[
 		name: 'Github',

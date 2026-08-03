@@ -45,7 +45,7 @@ dependencies {
 	implementation project(':search:batch-indexer')
 	implementation project(':script-security-plugin')
 
-	implementation platform("org.apache.groovy:groovy-bom:${groovyVersion}")
+	implementation platform("org.apache.groovy:groovy-bom:${libs.versions.groovy.get()}")
 	implementation 'org.apache.groovy:groovy'
 	implementation 'org.apache.groovy:groovy-templates'
 	implementation 'org.apache.groovy:groovy-json'

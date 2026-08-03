@@ -40,7 +40,7 @@ application {
 }
 
 dependencies {
-	implementation platform("org.apache.groovy:groovy-bom:${groovyVersion}")
+	implementation platform("org.apache.groovy:groovy-bom:${libs.versions.groovy.get()}")
 	implementation 'org.apache.groovy:groovy'
 	implementation 'org.apache.groovy:groovy-json'
 	implementation libs.picocli

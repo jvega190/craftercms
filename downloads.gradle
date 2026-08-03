@@ -26,6 +26,12 @@ buildscript {
 apply from: 'commons.gradle'
 apply plugin: 'de.undercouch.download'
 
+def tomcatVersion = libs.versions.tomcat.get()
+def tomcatMajorVersion = tomcatVersion.tokenize('.')[0]
+def groovyVersion = libs.versions.groovy.get()
+def openSearchVersion = libs.versions.opensearch.asProvider().get()
+def mariadb4jVersion = libs.versions.mariadb4j.get()
+
 ext.downloads = [
 	[
 		name             : "tomcat",
