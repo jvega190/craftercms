@@ -417,7 +417,7 @@ public interface PublishDAO {
 	 * @param limit     the max number of items to return
 	 * @return failed PublishItem records for the package
 	 */
-	default Collection<PublishItem> getFailedPublishItems(String siteId, long packageId, int offset, int limit) {
+	default Collection<PublishItem> getFailedPublishItems(String siteId, long packageId, Integer offset, Integer limit) {
 		return getPublishItemsInternal(siteId, packageId, LIVE_FAILED.value | STAGING_FAILED.value, offset, limit);
 	}
 

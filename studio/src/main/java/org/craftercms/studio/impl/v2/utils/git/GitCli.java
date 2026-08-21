@@ -463,6 +463,21 @@ public class GitCli {
 		}
 	}
 
+	/**
+	 * Set the repository to be bare
+	 *
+	 * @param repoDir the git repository directory
+	 * @throws GitCliException if the git config command fails
+	 */
+	public void setBareRepository(File repoDir) throws GitCliException {
+		GitCommandLine setBareCl = new GitCommandLine(repoDir, "config", "--bool", "core.bare", "true");
+		try {
+			executeGitCommand(setBareCl);
+		} catch (Exception e) {
+			throw new GitCliException("Git set-bare-repository failed on directory " + repoDir.getAbsolutePath(), e);
+		}
+	}
+
 	protected class GitCommandLine extends ArrayList<String> {
 
 		private final File directory;

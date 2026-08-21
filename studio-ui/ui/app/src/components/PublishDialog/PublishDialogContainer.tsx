@@ -109,7 +109,7 @@ export function PublishDialogContainer(props: PublishDialogContainerProps) {
 		itemsAndDependenciesMap
 	} = usePublishState({ mainItems, childrenItems });
 	const { updateSubmittingOrHasPendingChanges } = useEnhancedDialogContext();
-	const hasPublishPermission = permissionsBySite[siteId].includes('publish_approve');
+	const hasPublishPermission = permissionsBySite[siteId].includes('publish_review');
 	const publishingTarget = useMemo(() => {
 		let target: InternalDialogState['publishingTarget'] = '';
 		if (mainItems) {
