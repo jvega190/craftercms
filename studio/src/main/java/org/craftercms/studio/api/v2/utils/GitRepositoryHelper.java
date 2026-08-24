@@ -1458,21 +1458,25 @@ public class GitRepositoryHelper implements DisposableBean {
 	}
 
 	/**
-	 * Checkout a branch, optionally creating it if it doesn't exist
+	 * Create a branch
 	 *
 	 * @param repository   the repository
-	 * @param sourceBranch starting point of the branch to checkout
-	 * @param targetBranch the branch to checkout
-	 * @param create       if the branch should be created if it doesn't exist
-	 * @throws GitAPIException if an error occurs
+	 * @param site         the site
+	 * @param sourceBranch starting point of the branch to create
+	 * @param targetBranch the branch to create
+	 * @throws RepositoryException if an error occurs
 	 */
-	public void checkoutBranch(Repository repository, String sourceBranch, String targetBranch, boolean create) throws GitAPIException {
-		try (Git git = new Git(repository)) {
-			CheckoutCommand checkoutCommand = git.checkout()
-				.setName(targetBranch)
-				.setCreateBranch(create)
-				.setStartPoint(sourceBranch);
-			retryingRepositoryOperationFacade.call(checkoutCommand);
+	public void createBranch(Repository repository, String site, String sourceBranch, String targetBranch)
+			throws RepositoryException {
+		try {
+			gitCli.updateRef(repository.getDirectory(), getBranchRefName(sourceBranch), getBranchRefName(targetBranch));
+		} catch (IOException e) {
+			logger.error("Failed to create branch in site '{}' source branch '{}' target branch '{}'", site,
+					sourceBranch, targetBranch, e);
+			throw new RepositoryException(
+					format("Failed to create branch in site '%s' source branch '%s' target branch '%s'", site,
+							sourceBranch, targetBranch),
+					e);
 		}
 	}
 
