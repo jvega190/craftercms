@@ -419,13 +419,16 @@ export function createExternalUploadAction(options: {
 	id?: string;
 	label?: string;
 	path: string;
-	profileId: string;
+	profileId?: string;
+	inputProfileId?: string;
+	outputProfileId?: string;
 	profileType?: 'aws' | 'webdav';
 	fileTypes?: string[];
 	selection: 'item' | 'asset';
 	meta?: DataSourceActionMeta;
+	transcode?: boolean;
 }): DataSourceAction {
-	const { path, profileId, profileType = 'aws', fileTypes, selection } = options;
+	const { path, profileId, inputProfileId, outputProfileId, profileType = 'aws', fileTypes, selection, transcode = false } = options;
 	return {
 		id: options.id ?? 'upload',
 		kind: 'upload',
@@ -434,19 +437,25 @@ export function createExternalUploadAction(options: {
 			path,
 			fileTypes,
 			profileId,
+			inputProfileId,
+			outputProfileId,
 			profileType,
+			transcode,
 			...options.meta
 		},
 		async run(ctx) {
-			if (!profileId) {
-				throw new Error('External upload requires a profileId on the data source.');
+			if (!profileId && (!inputProfileId || !outputProfileId)) {
+				throw new Error('External upload requires a profileId or inputProfileId and outputProfileId on the data source.');
 			}
 			const expanded = expandPathOrRaw(ctx, path);
 			const result = await ctx.services.uploadExternalAssets({
 				path: expanded,
 				profileId,
 				profileType,
-				fileTypes
+				fileTypes,
+				inputProfileId,
+				outputProfileId,
+				transcode
 			});
 			if (!result) return null;
 			const mapped = selection === 'asset' ? mapUploadResultToAssets(result) : mapUploadResultToItems(result);
