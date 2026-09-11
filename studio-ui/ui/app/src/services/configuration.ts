@@ -208,7 +208,7 @@ export function fetchHistory(
 	const parsedPath = encodeURIComponent(path.replace(/(\/config\/)(studio|engine)/g, ''));
 
 	return get(
-		`/studio/api/2/configuration/${site}/get_configuration_history.json?path=${parsedPath}&environment=${environment}&module=${module}`
+		`/studio/api/2/configuration/${site}/get_configuration_history?path=${parsedPath}&environment=${environment}&module=${module}`
 	).pipe(map((response) => response?.response.history.versions));
 }
 
