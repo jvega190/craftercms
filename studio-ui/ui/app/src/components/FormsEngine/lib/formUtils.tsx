@@ -36,7 +36,7 @@ import { fetchContentItem, fetchContentXML, fetchDescriptorXML, lock, unlock } f
 import { AjaxError } from 'rxjs/ajax';
 import { fetchAffectedPackages } from '../../../services/workflow';
 import { Dispatch as ReduxDispatch } from 'redux';
-import { IntlShape } from 'react-intl/src/types';
+import { IntlShape } from 'react-intl';
 import { showSystemNotification, showUnlockItemSuccessNotification } from '../../../state/actions/system';
 import { atom, Atom, PrimitiveAtom, useAtomValue, useStore as useJotaiStore } from 'jotai';
 import React, { ReactNode, RefObject, useContext, useEffect, useRef } from 'react';
@@ -863,7 +863,7 @@ export function generateDefaultCreationComment(
 	pageUrl: string,
 	formatMessage: IntlShape['formatMessage'],
 	currentMessage?: string,
-	lastGeneratedMessage?: string,
+	lastGeneratedMessage?: string
 ): string | undefined {
 	const newMessage = pageUrl
 		? formatMessage({ defaultMessage: 'Created {pageUrl}' }, { pageUrl })
@@ -872,7 +872,7 @@ export function generateDefaultCreationComment(
 	if (!currentMessage || !lastGeneratedMessage) {
 		return newMessage;
 	}
-		
+
 	if (
 		// Nothing to change
 		currentMessage === newMessage ||
