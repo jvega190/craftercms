@@ -107,6 +107,7 @@ import { extractErrorPayload } from '../../../utils/ajax';
 import Typography from '@mui/material/Typography';
 import { AjaxError } from 'rxjs/ajax';
 import { sectionDescriptor, typeBasicDetailsDescriptor } from '../descriptors/controls/commonDescriptors';
+import { ContentItem } from '../../../models/Item';
 
 export interface EditTypeAppProps {
 	/**
@@ -146,6 +147,11 @@ interface EditAppContextProps {
 	 * Used to avoid committing changes where not necessary.
 	 **/
 	formFieldsChanged: boolean;
+	/**
+	 * Incremented for every debounced validation run. Awaiting runs capture it beforehand so that
+	 * results from overlapping validations of the same form can be discarded when they resolve out of order.
+	 **/
+	validationSeq: number;
 }
 
 export interface ContentTypeManagementConfig {
@@ -196,6 +202,9 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 
 	const [activeFormHasErrors, setActiveFormHasErrors] = useState<boolean>(false);
 	const [validatingForm, setValidatingForm] = useState<boolean>(false);
+	const [contentItem, setContentItem] = useState<ContentItem>(null);
+	// Bumped after save of an existing type so the effect re-fetches (and cancels any in-flight request).
+	const [contentItemReloadToken, setContentItemReloadToken] = useState(0);
 	const configDescriptors = useMemo(() => {
 		const controlDescriptors = Object.values(config?.controls ?? {}).map(({ descriptor }) => descriptor);
 		const dataSourceDescriptors = Object.values(config?.dataSources ?? {}).map(({ descriptor }) => descriptor);
@@ -272,6 +281,7 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 		// stateRef.current.activeFormContext = null;
 		setVirtualContentType(null);
 		setSelectedFieldIdPath(null);
+		setValidatingForm(false);
 		setOpen(false);
 		return true;
 	};
@@ -472,8 +482,12 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 						onUpdateHasPendingChanges(false);
 						dialogContext?.updateSubmittingOrHasPendingChanges({ isSubmitting: false, hasPendingChanges: false });
 						// If the type being saved is new, update the type state to remove the NEW property.
+						// Clearing NEW triggers the contentItem effect to fetch once. For existing types, bump
+						// the reload token so the same effect re-fetches (and cancels any in-flight request).
 						if ((typeToSave as PossibleContentTypeDraft).NEW) {
 							setType(reversePluckProps(typeToSave as PossibleContentTypeDraft, 'NEW'));
+						} else {
+							setContentItemReloadToken((token) => token + 1);
 						}
 						dispatch(
 							batchActions([
@@ -730,15 +744,19 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 
 	const handleReorderSectionFields = (fields: ReorderFieldsDialogProps['fields'], sectionId: string) => {
 		onUpdateHasPendingChanges(true);
-		setType((currentType) => {
-			const nextType = reorderSectionFields(currentType, fields, sectionId);
-			// Refresh the section form when that section is already open in the drawer.
-			if (fieldFormViewProps?.section?.id === sectionId) {
-				const nextSection = getSectionFromType(nextType, sectionId);
-				handleSectionSelected(nextSection, nextType);
-			}
-			return nextType;
-		});
+		// Commit open form edits first so the reorder runs on up-to-date type state,
+		// and clear the dirty flag so a subsequent closeAndCleanup won't re-commit onto a stale type.
+		const baseType = commitOpenFormChanges() ?? type;
+		stateRef.current.formFieldsChanged = false;
+
+		const nextType = reorderSectionFields(baseType, fields, sectionId);
+		setType(nextType);
+
+		// Refresh the section form when that section is already open in the drawer.
+		if (fieldFormViewProps?.section?.id === sectionId) {
+			const nextSection = getSectionFromType(nextType, sectionId);
+			handleSectionSelected(nextSection, nextType);
+		}
 	};
 
 	const handleReorderTypeSections = (sections: ReorderFieldsDialogProps['fields']) => {
@@ -759,15 +777,23 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 			// Ignore queued updates after close/rollback so they can't re-dirty or write stale values.
 			if (!effectRefs.current.open) return;
 			const { fieldPathsWithErrors, selectedFieldIdPath, onUpdateHasPendingChanges, jotai } = effectRefs.current;
+			// Capture the form that triggered this update so we can discard results if it closes or is replaced while awaiting.
+			const formContext = stateRef.current.activeFormContext;
 			onUpdateHasPendingChanges(true);
 			stateRef.current.formFieldsChanged = true;
 			const nextFieldPathsWithErrors = { ...fieldPathsWithErrors };
 			// Check validation atoms of the form to see if there are any unfulfilled validations.
 			setValidatingForm(true);
-			const hasErrors = await validityAtomsHaveErrors(
-				jotai,
-				stateRef.current?.activeFormContext?.atoms?.validationByFieldId
-			);
+			const validationSeq = ++stateRef.current.validationSeq;
+			const hasErrors = await validityAtomsHaveErrors(jotai, formContext?.atoms?.validationByFieldId);
+			// `activeFormContext` is intentionally kept after close, so also re-check `open`.
+			if (!effectRefs.current.open || stateRef.current.activeFormContext !== formContext) {
+				// Close clears validatingForm; leave it alone when a newer form owns in-flight validation.
+				if (!effectRefs.current.open) setValidatingForm(false);
+				return;
+			}
+			// A newer run for this same form started while awaiting; it owns the error state and validatingForm.
+			if (validationSeq !== stateRef.current.validationSeq) return;
 			setActiveFormHasErrors(hasErrors);
 			nextFieldPathsWithErrors[selectedFieldIdPath] = hasErrors;
 			if (!nextFieldPathsWithErrors[selectedFieldIdPath]) delete nextFieldPathsWithErrors[selectedFieldIdPath];
@@ -777,9 +803,9 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 
 			// Live-sync draft thumbnailFileName while the type properties form is open,
 			// so TypeCardMedia can reload by filename without waiting for form commit / save.
-			const { selectedField, selectedSection, selectedDataSource, activeFormContext } = stateRef.current;
-			if (!selectedField && !selectedSection && !selectedDataSource && activeFormContext) {
-				const thumbnailAtom = activeFormContext.atoms.valueByFieldId.thumbnailFileName;
+			const { selectedField, selectedSection, selectedDataSource } = stateRef.current;
+			if (!selectedField && !selectedSection && !selectedDataSource && formContext) {
+				const thumbnailAtom = formContext.atoms.valueByFieldId.thumbnailFileName;
 				if (thumbnailAtom) {
 					const thumbnailFileName = (jotai.get(thumbnailAtom) as string) || null;
 					setType((current) =>
@@ -798,6 +824,18 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 			effectRefs.current.handleEditTypeProperties();
 		}
 	}, [type.NEW, effectRefs]);
+
+	useEffect(() => {
+		if (type.NEW) {
+			setContentItem(null);
+			return;
+		}
+		const sub = fetchContentItem(site, `${CONTENT_TYPES_BASE_PATH}${type.id}/form-definition.xml`).subscribe({
+			next: setContentItem,
+			error: () => setContentItem(null)
+		});
+		return () => sub.unsubscribe();
+	}, [site, type.id, type.NEW, contentItemReloadToken]);
 
 	useEffect(() => {
 		const sub = fetchSiteUiConfig(site, activeEnvironment).subscribe({
@@ -856,6 +894,7 @@ export const EditTypeView = forwardRef<HTMLDivElement, EditTypeAppProps>((props,
 				mainContent={
 					<TypeDetailsView
 						type={type}
+						contentItem={contentItem}
 						onInsertSection={handleInsertSection}
 						onOpenInsertFieldDialog={onOpenInsertFieldDialog}
 						onOpenInsertDataSourceDialog={onOpenInsertDataSourceDialog}
@@ -910,7 +949,8 @@ function createContextObject(): EditAppContextProps {
 		selectedField: null,
 		selectedSection: null,
 		selectedDataSource: null,
-		formFieldsChanged: false
+		formFieldsChanged: false,
+		validationSeq: 0
 	};
 }
 

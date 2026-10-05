@@ -78,11 +78,10 @@ import { pushDialog } from '../../state/actions/dialogStack';
 import useFetchContentItems from '../../hooks/useFetchContentItems';
 import ErrorBoundary from '../ErrorBoundary';
 import { debounceTime } from 'rxjs/operators';
-import { atom, createStore, Provider, useAtom, useAtomValue, useStore as useJotaiStore } from 'jotai';
+import { atom, createStore, Provider, PrimitiveAtom, useAtom, useAtomValue, useStore as useJotaiStore } from 'jotai';
 import useActiveSiteId from '../../hooks/useActiveSiteId';
 import useSelection from '../../hooks/useSelection';
 import ApiResponse from '../../models/ApiResponse';
-import { PrimitiveAtom } from 'jotai/index';
 import { AjaxError } from 'rxjs/ajax';
 import { ViewPackagesDialogProps } from '../ViewPackagesDialog';
 import {
@@ -387,13 +386,15 @@ function FormBootstrap(props: FormsEngineProps) {
 					effectRefs.current.contentTypesById
 				);
 				// If import failed but no field mapped (defensive), still surface something so save stays blocked.
-				if (pluginPreloadFailures.length && !affected.length) {
-					return pluginPreloadFailures.map((failure) => ({
-						fieldId: failure.plugin.name,
-						fieldName: failure.plugin.name
-					}));
-				}
-				return affected;
+				const fields =
+					pluginPreloadFailures.length && !affected.length
+						? pluginPreloadFailures.map((failure) => ({
+								fieldId: failure.plugin.name,
+								fieldName: failure.plugin.name
+							}))
+						: affected;
+				// Tag as bootstrap so save will not clear them for an in-place import retry.
+				return fields.map((field) => ({ ...field, fromBootstrap: true }));
 			})();
 			setItemMeta(stableFormContextRef.current.itemMeta);
 			setReady(true);
