@@ -172,7 +172,7 @@
 	<!-- Remember Me -->
 
     <bean id="crafter.rememberMeServices"
-          class="org.craftercms.engine.util.spring.security.profile.ProfileRememberMeServices">
+          class="org.springframework.security.web.authentication.rememberme.TokenBasedRememberMeServices">
         <constructor-arg name="key" value="${crafter.security.rememberme.key}"/>
         <constructor-arg name="userDetailsService" ref="crafter.userDetailsService"/>
     </bean>

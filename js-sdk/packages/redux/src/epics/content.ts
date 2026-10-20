@@ -14,15 +14,17 @@
  * along with this program. If not, see http://www.gnu.org/licenses/.
  */
 
-import { Observable, of } from 'rxjs';
+import { Observable, of, Subject } from 'rxjs';
 import { AnyAction } from 'redux';
-import { mergeMap, map, catchError } from 'rxjs/operators';
+import { mergeMap, map, catchError, groupBy, switchMap, tap } from 'rxjs/operators';
 import { ofType } from 'redux-observable';
 
 import { ContentStoreService, NavigationService } from '@craftercms/content';
 import {
 	getItem,
 	getItemComplete,
+	getDescriptor,
+	getDescriptorComplete,
 	getChildren,
 	getChildrenComplete,
 	getTree,
@@ -54,6 +56,49 @@ export const getItemEpic = (action$: Observable<AnyAction>) =>
 			)
 		)
 	);
+
+export const getDescriptorEpic = (action$: Observable<AnyAction>) => {
+	// Closes the URL group after the active request settles. Not part of the epic output.
+	const closeGroup = new Map<string, Subject<void>>();
+
+	return action$.pipe(
+		ofType(getDescriptor.type),
+		groupBy(({ payload }) => payload as string, {
+			duration: ({ key }) => {
+				const settled$ = new Subject<void>();
+				closeGroup.set(key, settled$);
+				return settled$;
+			}
+		}),
+		mergeMap((group$) =>
+			group$.pipe(
+				switchMap(({ payload }) =>
+					ContentStoreService.getDescriptor(payload).pipe(
+						map((descriptor) =>
+							getDescriptorComplete({
+								descriptor,
+								url: payload
+							})
+						),
+						catchError(() =>
+							of(
+								getDescriptorComplete({
+									url: payload
+								})
+							)
+						),
+						tap({
+							complete: () => {
+								closeGroup.get(group$.key)?.next();
+								closeGroup.delete(group$.key);
+							}
+						})
+					)
+				)
+			)
+		)
+	);
+};
 
 export const getChildrenEpic = (action$: Observable<AnyAction>) =>
 	action$.pipe(
@@ -143,4 +188,11 @@ export const getNavBreadcrumbEpic = (action$: Observable<AnyAction>) =>
 		)
 	);
 
-export const allContentEpics = [getItemEpic, getChildrenEpic, getTreeEpic, getNavEpic, getNavBreadcrumbEpic];
+export const allContentEpics = [
+	getItemEpic,
+	getDescriptorEpic,
+	getChildrenEpic,
+	getTreeEpic,
+	getNavEpic,
+	getNavBreadcrumbEpic
+];

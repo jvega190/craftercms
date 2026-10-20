@@ -16,6 +16,7 @@
 
 plugins {
 	id 'java-library'
+	id 'com.gradleup.shadow'
 }
 
 ext.crafterManifestTitle = 'Crafter Commons Utilities'
@@ -43,6 +44,7 @@ dependencies {
 
 	compileOnly libs.bcpg.jdk18on
 	compileOnly libs.commons.configuration2
+	compileOnly libs.dom4j
 	compileOnly libs.commons.cli
 	compileOnly libs.jakarta.servlet.api
 	compileOnly libs.spring.context
@@ -77,10 +79,76 @@ dependencies {
 	testImplementation libs.jackson.annotations
 	testImplementation libs.guava
 	testImplementation libs.commons.configuration2
+	testImplementation libs.dom4j
 	testImplementation libs.snakeyaml
 	testImplementation libs.jakarta.servlet.api
 }
 
 tasks.named('test') {
 	environment 'TEST_ENV_PROPERTY1', 'CUSTOM_VALUE'
+}
+
+// Standalone encryption tool, attached with classifier "enctool".
+// commons-cli is compileOnly on the library so consumers do not inherit it, but the tool jar needs it bundled.
+configurations {
+	encryptionToolCli {
+		canBeConsumed = false
+		canBeResolved = true
+		description = 'Dependencies bundled only into the encryption tool jar'
+	}
+}
+
+dependencies {
+	encryptionToolCli libs.commons.cli
+}
+
+shadow {
+	addShadowVariantIntoJavaComponent = false
+}
+
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+	description = 'Builds the minimized encryption tool jar'
+	archiveClassifier = 'enctool'
+	configurations = project.provider {
+		[
+			project.configurations.runtimeClasspath,
+			project.configurations.encryptionToolCli
+		]
+	}
+	minimize()
+	manifest {
+		attributes(crafterManifestAttributes())
+		attributes('Main-Class': 'org.craftercms.commons.crypto.impl.EncryptionTool')
+	}
+	// Drop dependency metadata and signatures. shadowJar still writes its own manifest.
+	exclude 'META-INF/**'
+	exclude 'module-info.class'
+	[
+		'org/aspectj/lang/annotation/Aspect.class',
+		'org/aspectj/lang/JoinPoint$StaticPart.class',
+		'org/aspectj/runtime/internal/AroundClosure.class',
+		'org/aspectj/lang/ProceedingJoinPoint.class',
+		'org/aspectj/lang/Signature.class',
+		'org/aspectj/lang/JoinPoint.class',
+		'org/aspectj/lang/JoinPoint$EnclosingStaticPart.class',
+		'org/aspectj/lang/annotation/Around.class',
+		'org/aspectj/lang/reflect/SourceLocation.class',
+		'org/aspectj/lang/reflect/MethodSignature.class',
+		'org/aspectj/lang/reflect/CodeSignature.class',
+		'org/aspectj/lang/reflect/MemberSignature.class',
+		'org/apache/commons/logging/Log.class',
+		'org/apache/commons/logging/LogConfigurationException.class',
+		'org/apache/commons/logging/impl/NoOpLog.class',
+		'org/apache/commons/logging/LogFactory.class'
+	].each { pattern -> exclude pattern }
+}
+
+tasks.named('assemble') {
+	dependsOn tasks.named('shadowJar')
+}
+
+afterEvaluate {
+	publishing.publications.named('maven').configure {
+		artifact(tasks.named('shadowJar'))
+	}
 }

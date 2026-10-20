@@ -366,10 +366,16 @@
 	<!--                                    -->
 	<!-- ////////////////////////////////// -->
 
-	<bean id="crafter.textEncryptor" class="org.craftercms.commons.crypto.impl.PbkAesTextEncryptor">
-		<constructor-arg name="password" value="${crafter.security.encryption.key}"/>
-		<constructor-arg name="salt" value="${crafter.security.encryption.salt}"/>
-	</bean>
+    <bean id="crafter.textEncryptor" class="org.craftercms.commons.crypto.impl.PbkAesTextEncryptor">
+        <constructor-arg name="password" value="${crafter.security.encryption.key}"/>
+        <constructor-arg name="salt" value="${crafter.security.encryption.salt}"/>
+    </bean>
+
+    <bean id="crafter.previewTokenEncryptor" class="org.craftercms.commons.crypto.impl.PbkAesTextEncryptor">
+        <constructor-arg name="password" value="${crafter.security.preview.token.key}"/>
+        <constructor-arg name="salt" value="${crafter.security.preview.token.salt}"/>
+		<constructor-arg name="noEncodePrefix" value="${crafter.security.preview.token.prefix}"/>
+    </bean>
 
 	<bean id="crafter.configurationReader" class="org.craftercms.commons.config.EncryptionAwareConfigurationReader">
 		<constructor-arg name="textEncryptor" ref="crafter.textEncryptor"/>
@@ -759,6 +765,7 @@
 		</constructor-arg>
 		<constructor-arg name="indexIdFormat" value="${crafter.engine.search.index.format}"/>
 		<constructor-arg name="enableTranslation" value="${crafter.engine.translation.enable}"/>
+		<constructor-arg name="failOnPartialShardFailure" value="${crafter.engine.search.failOnPartialShardFailure}"/>
 		<property name="filterQueries" value="${crafter.engine.search.filters}"/>
 	</bean>
 
@@ -1001,6 +1008,7 @@
 		<constructor-arg name="defaultSortField" value="${crafter.engine.graphql.query.sort.field}"/>
 		<constructor-arg name="defaultSortOrder" value="${crafter.engine.graphql.query.sort.order}"/>
 		<constructor-arg name="searchClient" ref="crafter.searchClient"/>
+		<constructor-arg name="ignoredFields" value="${crafter.engine.graphql.query.includes.ignore:__typename}"/>
 	</bean>
 
 	<bean id="crafter.urlTransformDataFetcher" class="org.craftercms.engine.graphql.impl.fetchers.UrlTransformDataFetcher">

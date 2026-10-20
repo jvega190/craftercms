@@ -51,7 +51,13 @@ public class PermissionAwareSearchService extends AbstractOpenSearchClientWrappe
 
 	@ConstructorProperties({"client", "indexSuffix", "pathFieldName"})
 	public PermissionAwareSearchService(OpenSearchClient client, String indexSuffix, String pathFieldName) {
-		super(client);
+		this(client, indexSuffix, pathFieldName, false);
+	}
+
+	@ConstructorProperties({"client", "indexSuffix", "pathFieldName", "failOnPartialShardFailure"})
+	public PermissionAwareSearchService(OpenSearchClient client, String indexSuffix, String pathFieldName,
+					    boolean failOnPartialShardFailure) {
+		super(client, failOnPartialShardFailure);
 		this.indexSuffix = indexSuffix;
 		this.pathFieldName = pathFieldName;
 	}

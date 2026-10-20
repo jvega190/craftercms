@@ -79,7 +79,7 @@ ext.applyReleaseVersions = { String releaseVersion, String gitBranchName ->
 	}
 }
 
-/** Builds linux/darwin/aarch64 bundles, optionally uploads to S3, then cleans bundle dirs. */
+/** Builds linux/darwin/aarch64 bundles, optionally uploads to S3, cleaning bundle dirs before and after each variant. */
 ext.runReleaseBundleMatrix = { String s3Path ->
 	def platformVariants = [
 		[:],
@@ -88,6 +88,10 @@ ext.runReleaseBundleMatrix = { String s3Path ->
 	]
 
 	platformVariants.each { platformProps ->
+		delete file("${projectDir}/bundles")
+		delete file("${projectDir}/crafter-authoring")
+		delete file("${projectDir}/crafter-delivery")
+
 		def args = ['./gradlew', 'deploy', 'bundle']
 		platformProps.each { key, value ->
 			args << "-P${key}=${value}"

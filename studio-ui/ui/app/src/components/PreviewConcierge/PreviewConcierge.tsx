@@ -56,7 +56,12 @@ import {
 	moveItemOperationComplete,
 	moveItemOperationFailed,
 	reloadRequest,
+	cancelGuestUpload,
+	guestUploadComplete,
+	guestUploadFailed,
+	guestUploadProgress,
 	requestEdit,
+	requestGuestUpload,
 	requestWorkflowCancellationDialog,
 	requestWorkflowCancellationDialogOnResult,
 	selectForEdit,
@@ -90,8 +95,9 @@ import {
 	updateField,
 	writeInstance
 } from '../../services/content';
+import { uploadDataUrl } from '../../services/contentUpload';
 import { filter, map, switchMap, take, takeUntil } from 'rxjs/operators';
-import { BehaviorSubject, forkJoin, Observable, of } from 'rxjs';
+import { BehaviorSubject, forkJoin, Observable, of, Subscription } from 'rxjs';
 import { FormattedMessage, useIntl } from 'react-intl';
 import { getGuestToHostBus, getHostToGuestBus, getHostToHostBus } from '../../utils/subjects';
 import { useDispatch, useStore } from 'react-redux';
@@ -364,6 +370,8 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 	const modelIdByPath = guest?.modelIdByPath;
 	const hierarchyMap = guest?.hierarchyMap;
 	const requestedSourceMapPaths = useRef({});
+	// In-flight guest→host Uppy uploads keyed by request id; unsubscribed on cancel/checkout.
+	const guestUploadSubscriptionsRef = useRef(new Map<string, Subscription>());
 	const currentItemPath = guest?.path;
 	const uiConfig = useSiteUIConfig();
 	const { cdataEscapedFieldPatterns } = uiConfig;
@@ -814,6 +822,8 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 					// A fresh check-in means the guest reloaded (possibly without checking out, e.g. when the
 					// iFrame url changes abruptly), so any picker request from the previous page is orphaned.
 					upToDateRefs.current.cancelActiveRteDataSourcePicker();
+					guestUploadSubscriptionsRef.current.forEach((subscription) => subscription.unsubscribe());
+					guestUploadSubscriptionsRef.current.clear();
 					getHostToGuestBus().next(
 						hostCheckIn({
 							editMode: false,
@@ -870,6 +880,8 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 					requestedSourceMapPaths.current = {};
 					// The editor that requested the picker is gone with the page; nobody is left to reply to.
 					upToDateRefs.current.cancelActiveRteDataSourcePicker();
+					guestUploadSubscriptionsRef.current.forEach((subscription) => subscription.unsubscribe());
+					guestUploadSubscriptionsRef.current.clear();
 					dispatch(action);
 					break;
 				}
@@ -1298,6 +1310,54 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 					);
 					break;
 				}
+				case requestGuestUpload.type: {
+					const { id, site, file, path, xsrfArgumentName } = payload;
+					if (site !== siteId) {
+						hostToGuest$.next(
+							guestUploadFailed({
+								id,
+								error: {
+									message: formatMessage({ defaultMessage: 'Upload site does not match the active preview site' })
+								}
+							})
+						);
+						break;
+					}
+					try {
+						const subscription = uploadDataUrl(siteId, file, path, xsrfArgumentName).subscribe({
+							next: (uploadAction) => {
+								if (uploadAction.type === 'progress') {
+									hostToGuest$.next(
+										guestUploadProgress({
+											id,
+											progress: uploadAction.payload.progress
+										})
+									);
+								} else {
+									guestUploadSubscriptionsRef.current.delete(id);
+									hostToGuest$.next(guestUploadComplete({ id, response: uploadAction.payload }));
+								}
+							},
+							error: (error) => {
+								guestUploadSubscriptionsRef.current.delete(id);
+								hostToGuest$.next(guestUploadFailed({ id, error }));
+							}
+						});
+						guestUploadSubscriptionsRef.current.set(id, subscription);
+					} catch (error) {
+						hostToGuest$.next(guestUploadFailed({ id, error }));
+					}
+					break;
+				}
+				case cancelGuestUpload.type: {
+					const { id } = payload;
+					const subscription = guestUploadSubscriptionsRef.current.get(id);
+					if (subscription) {
+						subscription.unsubscribe();
+						guestUploadSubscriptionsRef.current.delete(id);
+					}
+					break;
+				}
 				case showItemMegaMenu.type: {
 					const extendedAction = action as StandardAction<Partial<ItemMegaMenuStateProps>>;
 					const iframe: HTMLIFrameElement = document.querySelector('#crafterCMSPreviewIframe');
@@ -1497,6 +1557,8 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 		});
 		return () => {
 			guestToHostSubscription.unsubscribe();
+			guestUploadSubscriptionsRef.current.forEach((subscription) => subscription.unsubscribe());
+			guestUploadSubscriptionsRef.current.clear();
 		};
 	}, [upToDateRefs]);
 
@@ -1568,8 +1630,11 @@ export function PreviewConcierge(props: PropsWithChildren<{}>) {
 			if (guest) {
 				// Changing the site will force-reload the iFrame and 'beforeunload'
 				// event won't trigger withing; guest won't be submitting it's own checkout
-				// in such cases.
+				// in such cases. Clear uploads here since guestCheckOut is dispatched to
+				// Redux directly (not via the guest bus), so the bus handler won't run.
 				upToDateRefs.current.cancelActiveRteDataSourcePicker();
+				guestUploadSubscriptionsRef.current.forEach((subscription) => subscription.unsubscribe());
+				guestUploadSubscriptionsRef.current.clear();
 				dispatch(guestCheckOut({ path: guest.path }));
 			}
 		}
