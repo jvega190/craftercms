@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2022 Crafter Software Corporation. All Rights Reserved.
+ * Copyright (C) 2007-2026 Crafter Software Corporation. All Rights Reserved.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 3 as published by
@@ -35,6 +35,13 @@ import { defer, Observable, of, Subscription, throwError } from 'rxjs';
 import { CONTENT_TYPE_JSON, get, getBinary, getGlobalHeaders, post } from '../utils/ajax';
 import { catchError, finalize, map, switchMap } from 'rxjs/operators';
 import { createLookupTable, nou, toQueryString } from '../utils/object';
+import {
+	countLimitPropertyWrites,
+	countLimitsFromLegacy,
+	getCountLimitStorage,
+	itemCountEditorValue,
+	type CountLimits
+} from '../utils/countLimits';
 import { fetchContentItems } from './content';
 import { ContentItem } from '../models/Item';
 import { fetchConfigurationDOM, writeConfiguration } from './configuration';
@@ -45,6 +52,7 @@ import { fromPromise } from 'rxjs/internal/observable/innerFrom';
 import AllowedContentTypesData from '../models/AllowedContentTypesData';
 import {
 	createFormDefinitionPathFromTypeId,
+	normalizeThumbnailFileName,
 	systemValidationsKeysMap,
 	systemValidationsNames
 } from '../utils/contentType';
@@ -243,12 +251,94 @@ function getFieldDataSourceValidations(
 	return validations;
 }
 
+function parseAllowedRoles(definition: LegacyFormDefinition): string[] {
+	const seen = new Set<string>();
+	const roles: string[] = [];
+	for (const entry of asArray(definition['allowed-roles']?.role)) {
+		if (typeof entry !== 'string') continue;
+		const trimmed = entry.trim();
+		if (!trimmed || seen.has(trimmed)) continue;
+		seen.add(trimmed);
+		roles.push(trimmed);
+	}
+	return roles;
+}
+
+function rawLegacyPropertyValue(legacyField: LegacyFormDefinitionField, name: string): unknown {
+	return asArray(legacyField.properties?.property).find((prop) => prop.name === name)?.value;
+}
+
+function rawLegacyConstraintValue(legacyField: LegacyFormDefinitionField, name: string): unknown {
+	return asArray(legacyField.constraints?.constraint).find((constraint) => constraint.name === name)?.value;
+}
+
+/**
+ * Stores the editor value for one bound. `ensure` creates a missing property (repeats).
+ * Without it, a missing property stays missing (node selector). The table decides which.
+ */
+function writeCountEditorProperty(
+	field: ContentTypeField,
+	name: string,
+	limit: number | undefined,
+	kind: 'min' | 'max',
+	options?: { ensure?: boolean; type?: string }
+): void {
+	const current = field.properties?.[name];
+	if (!current && !options?.ensure) return;
+	const type = options?.type ?? current?.type ?? (kind === 'min' ? 'int' : 'string');
+	field.properties[name] = {
+		...current,
+		name,
+		type,
+		value: itemCountEditorValue(limit, kind, type)
+	};
+}
+
+/** Writes virtual minCount/maxCount. Absent means unlimited. See utils/countLimits.ts. */
+function assignCountLimits(field: ContentTypeField, limits: CountLimits): void {
+	if (limits.minCount == null) delete field.validations.minCount;
+	else field.validations.minCount = { id: 'minCount', value: limits.minCount, level: 'required' };
+	if (limits.maxCount == null) delete field.validations.maxCount;
+	else field.validations.maxCount = { id: 'maxCount', value: limits.maxCount, level: 'required' };
+}
+
+/** Applies the count-limit table for this control. No entry means the field is left as parsed. */
+function applyCountLimits(
+	field: ContentTypeField,
+	legacyField: LegacyFormDefinitionField,
+	contentTypeId?: string
+): void {
+	const storage = getCountLimitStorage(legacyField.type);
+	if (!storage) return;
+	for (const name of storage.stripConstraints) {
+		delete field.validations[name as keyof typeof field.validations];
+	}
+	const limits = countLimitsFromLegacy(
+		storage,
+		{
+			element: (name) => legacyField[name as 'minOccurs' | 'maxOccurs'],
+			property: (name) => rawLegacyPropertyValue(legacyField, name),
+			constraint: (name) => rawLegacyConstraintValue(legacyField, name)
+		},
+		{ contentTypeId, fieldId: field.id }
+	);
+	assignCountLimits(field, limits);
+	for (const write of countLimitPropertyWrites(storage, limits)) {
+		writeCountEditorProperty(field, write.name, write.limit, write.kind, {
+			ensure: write.ensure,
+			...(write.type ? { type: write.type } : {})
+		});
+	}
+}
+
+/** Maps legacy form-definition fields into the Forms Engine content-type model. */
 function parseLegacyFormDefinitionFields(
 	legacyFieldsToBeParsed: LegacyFormDefinitionField[] | LegacyFormDefinitionField,
 	currentFieldLookup: LookupTable<ContentTypeField>,
 	dropTargetsLookup: LookupTable<DataSource>,
 	sectionFieldIds?: Array<string>,
-	dataSources?: LegacyDataSource[]
+	dataSources?: LegacyDataSource[],
+	contentTypeId?: string
 ): void {
 	asArray<LegacyFormDefinitionField>(legacyFieldsToBeParsed).forEach((legacyField) => {
 		// FE2 TODO: Changed the camelizing of file-name and internal-name
@@ -257,6 +347,7 @@ function parseLegacyFormDefinitionFields(
 
 		sectionFieldIds?.push(fieldId);
 
+		const rawConstraints: LegacyFormDefinitionProperty[] = [];
 		const field: ContentTypeField = {
 			id: fieldId,
 			name: legacyField.title,
@@ -266,7 +357,8 @@ function parseLegacyFormDefinitionFields(
 			sortable: legacyField.type === 'node-selector' || legacyField.type === 'repeat',
 			validations: {},
 			properties: {},
-			defaultValue: legacyField.defaultValue
+			defaultValue: legacyField.defaultValue,
+			rawConstraints
 		};
 
 		if (legacyField.plugin) {
@@ -283,15 +375,7 @@ function parseLegacyFormDefinitionFields(
 					value = legacyProp.value ? parseInt(legacyProp.value) : null;
 					break;
 				default:
-					if (
-						legacyField.type === 'repeat' &&
-						(legacyProp.name === 'minOccurs' || legacyProp.name === 'maxOccurs') &&
-						legacyProp.value === '*'
-					) {
-						value = null;
-					} else {
-						value = legacyProp.value;
-					}
+					value = legacyProp.value;
 			}
 			field.properties[legacyProp.name] = {
 				...legacyProp,
@@ -300,6 +384,8 @@ function parseLegacyFormDefinitionFields(
 		});
 
 		asArray<LegacyFormDefinitionProperty>(legacyField.constraints?.constraint).forEach((legacyProp) => {
+			if (!legacyProp.name) return;
+			rawConstraints.push({ ...legacyProp });
 			const value = legacyProp.value?.trim();
 			switch (legacyProp.name) {
 				case 'required':
@@ -329,62 +415,35 @@ function parseLegacyFormDefinitionFields(
 						};
 					}
 					break;
-				case 'minSize':
-					if (value) {
-						const n = Number.parseInt(value, 10);
-						if (!Number.isNaN(n)) {
-							field.validations.minSize = {
-								id: 'minSize',
-								value: Math.max(0, n),
-								level: 'required'
-							};
-						}
-					}
-					break;
 				default:
-					console.log(`[parseLegacyFormDef] Unhandled constraint "${legacyProp.name}"`, legacyProp);
+					// Item-count constraints (checkbox minSize) are applied from countLimitStorage, not as runtime validations.
+					break;
 			}
 		});
 
 		const propertyProp = legacyField.properties?.property;
 		switch (legacyField.type) {
 			case 'repeat': {
+				// Nested fields only. Count limits come from countLimitStorage below.
 				field.fields = {};
-				let min = legacyField?.minOccurs !== '*' ? parseInt(legacyField?.minOccurs) : null;
-				const max = legacyField?.maxOccurs !== '*' ? parseInt(legacyField?.maxOccurs) : null;
-				isNaN(min) && (min = 0);
-				field.validations.required = {
-					id: 'required',
-					value: min > 0,
-					level: 'required'
-				};
-				min > 0 &&
-					(field.validations.minCount = {
-						id: 'minCount',
-						value: min,
-						level: 'required'
-					});
-				if (max != null && !Number.isNaN(max)) {
-					field.validations.maxCount = {
-						id: 'maxCount',
-						value: max,
-						level: 'required'
-					};
-				}
-				parseLegacyFormDefinitionFields(legacyField.fields.field, field.fields, dropTargetsLookup, null, dataSources);
+				parseLegacyFormDefinitionFields(
+					legacyField.fields?.field,
+					field.fields,
+					dropTargetsLookup,
+					null,
+					dataSources,
+					contentTypeId
+				);
 				break;
 			}
-			case 'node-selector':
+			case 'node-selector': {
+				// Datasource validations. Count limits come from countLimitStorage below.
 				field.validations = {
 					...field.validations,
 					...getFieldValidations(propertyProp, dropTargetsLookup)
 				};
-				field.validations.required = {
-					id: 'required',
-					value: Boolean(field.validations.minCount?.value),
-					level: 'required'
-				};
 				break;
+			}
 			case 'input':
 			case 'textarea':
 			case 'numeric-input':
@@ -404,14 +463,17 @@ function parseLegacyFormDefinitionFields(
 				};
 		}
 
+		// Item-count limits for every control in countLimitStorage. Other types are unchanged.
+		applyCountLimits(field, legacyField, contentTypeId);
+
 		currentFieldLookup[fieldId] = field;
 	});
 }
 
-function parseLegacyFormDefinition(definition: LegacyFormDefinition): ContentType {
-	if (nou(definition)) {
-		return {} as ContentType;
-	}
+/** Maps a form-definition document into the Forms Engine content-type model. */
+export function parseLegacyFormDefinition(definition: LegacyFormDefinition): ContentType {
+	// A missing document parses as an empty form. `{}` has no sections and must not throw.
+	definition = definition ?? ({} as LegacyFormDefinition);
 
 	const fields: LookupTable<ContentTypeField> = {};
 	const sections: Array<ContentTypeSection> = [];
@@ -460,7 +522,8 @@ function parseLegacyFormDefinition(definition: LegacyFormDefinition): ContentTyp
 			fields,
 			dropTargetsLookup,
 			fieldIds,
-			legacyDataSourceArray
+			legacyDataSourceArray,
+			definition['content-type']
 		);
 
 		sections.push({
@@ -473,10 +536,8 @@ function parseLegacyFormDefinition(definition: LegacyFormDefinition): ContentTyp
 		});
 	});
 
-	const topLevelPropMap: LookupTable<LegacyFormDefinitionProperty> = createLookupTable(
-		asArray(definition.properties?.property) as LegacyFormDefinitionProperty[],
-		'name'
-	);
+	const formProperties = asArray(definition.properties?.property).map((property) => ({ ...property }));
+	const topLevelPropMap: LookupTable<LegacyFormDefinitionProperty> = createLookupTable(formProperties, 'name');
 
 	return {
 		id: definition['content-type'],
@@ -489,12 +550,14 @@ function parseLegacyFormDefinition(definition: LegacyFormDefinition): ContentTyp
 		mergeStrategy: topLevelPropMap[XmlKeys.mergeStrategy]?.value?.trim() || null,
 		// ∨∨∨ Added during TypeBuilder 2 ∨∨∨
 		hasJsController: definition.controller?.trim() === 'true',
-		thumbnailFileName: definition.imageThumbnail,
+		thumbnailFileName: normalizeThumbnailFileName(definition.imageThumbnail),
 		isHeadless: topLevelPropMap[XmlKeys.templateNotRequired]?.value?.trim() === 'true',
 		paths: parseLegacyFormDefinitionPathsProp(definition),
 		'delete-dependencies': parseFormDefinitionDeleteDependencies(definition),
 		'copy-dependencies': parseFormDefinitionCopyDependencies(definition),
 		previewable: definition.previewable?.trim() === 'true',
+		allowedRoles: parseAllowedRoles(definition),
+		formProperties,
 		// ^^^ Added during TypeBuilder 2 ^^^
 		dataSources: Object.values(dataSources),
 		sections,
@@ -794,7 +857,7 @@ export function fetchContentTypePreviewImageUrl(
 	if (thumbnailFileName) {
 		const path = ensureSingleSlash(`/config/studio/content-types/${contentTypeId}/${thumbnailFileName}`);
 		return getBinary(
-			`/studio/api/2/content/get_content_by_commit_id${toQueryString({ siteId: site, path, commitId: 'HEAD' })}`,
+			`/studio/api/2/content/${site}/get_content_by_commit_id${toQueryString({ path, commitId: 'HEAD' })}`,
 			void 0,
 			'blob'
 		).pipe(
