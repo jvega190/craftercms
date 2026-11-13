@@ -26,7 +26,7 @@ import { Site } from '../../models/Site';
 import CardMedia from '@mui/material/CardMedia';
 import CardActions from '@mui/material/CardActions';
 import Tooltip from '@mui/material/Tooltip';
-import { FormattedMessage, useIntl } from 'react-intl';
+import { defineMessage, FormattedMessage, useIntl } from 'react-intl';
 import CardActionArea from '@mui/material/CardActionArea';
 import Box from '@mui/material/Box';
 import { alpha, Typography } from '@mui/material';
@@ -231,7 +231,7 @@ export function SiteCard(props: SiteCardProps) {
 					/>
 				)}
 				{!compact && isSiteReady && onEditSiteClick && (
-					<Tooltip title={<FormattedMessage id="words.edit" defaultMessage="Edit" />}>
+					<Tooltip title={formatMessage({ id: 'words.edit', defaultMessage: 'Edit' })}>
 						<IconButton
 							onClick={() => onEditSiteClick(site)}
 							size="medium"

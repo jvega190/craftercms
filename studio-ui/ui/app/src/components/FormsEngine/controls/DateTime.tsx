@@ -22,7 +22,7 @@ import SecondaryButton from '../../SecondaryButton';
 import { FormattedMessage } from 'react-intl';
 import Box from '@mui/material/Box';
 import { StableFormContext, useStableFormContext } from '../lib/formsEngineContext';
-import { processPopulateExpression, validateDatePopulateExpression } from '../lib/controlHelpers';
+import { processPopulateExpression, validateDatePopulateExpression } from '../lib/dateExpressions';
 import { getPropertyValue, isFieldReadOnly } from '../lib/formUtils';
 import { PrimitiveAtom, useAtom } from 'jotai';
 
@@ -38,7 +38,7 @@ export function DateTime(props: DateTimeProps) {
 	const timezoneAtom = formContext.atoms.valueByFieldId[`${field.id}_tz`] as PrimitiveAtom<string> | undefined;
 	if (!timezoneAtom) {
 		throw new Error(
-			`The date/time field "${field.id}" cannot be displayed because its timezone companion field "${field.id}_tz" was not initialized. This usually means the content type definition for this field is incomplete or misconfigured. Try reloading the form; if the problem persists, please contact your administrator.`
+			`The date/time field "${field.id}" cannot be displayed because its timezone additional field "${field.id}_tz" was not initialized. This usually means the content type definition for this field is incomplete or misconfigured. Try reloading the form; if the problem persists, please contact your administrator.`
 		);
 	}
 	const [timezoneValue, setTimezoneValue] = useAtom(timezoneAtom);

@@ -33,10 +33,12 @@ import type { FieldValidityState, Validator } from './validators.ts';
 const React = await import('react');
 const { act } = await import('react');
 const { createRoot } = await import('react-dom/client');
-const { IntlProvider, createIntl } = await import('react-intl');
+const { RawIntlProvider, createIntl } = await import('react-intl');
+const { createTestIntl } = await import('../../../../test/createTestIntl.mjs');
 const { Provider } = await import('react-redux');
 const { configureStore } = await import('@reduxjs/toolkit');
 const { atom } = await import('jotai');
+const { createChangedFieldIdsAtom } = await import('./formUtils.tsx');
 const { registerPlugin } = await import('../../../services/plugin.ts');
 const { validateFieldValue } = await import('./validators.ts');
 const { FormsEngineField } = await import('../components/FormsEngineField.tsx');
@@ -46,7 +48,7 @@ const { createFormVisibilityAtoms } = await import('./formVisibility.ts');
 
 const source = { site: 'editorial', type: 'control', name: 'example', file: 'index.js' };
 const Component = (() => null) as ComponentType<AnyValue>;
-const meta = { siteId: 'editorial', fileName: 'index.xml', itemMeta: { path: '/site/website/index.xml' } };
+const meta = { siteId: 'editorial', itemMeta: { path: '/site/website/index.xml' } };
 const fallbackText = "This value couldn't be validated. Try again or contact your administrator.";
 const store = configureStore({ reducer: { content: (state = { itemsByPath: {} }) => state } });
 
@@ -69,7 +71,7 @@ function Harness(props: { validity: FieldValidityState; messages: Record<string,
 			validationByFieldId: { thing_s: validationAtom },
 			...createFormVisibilityAtoms()
 		},
-		changedFieldIds: new Set<string>(),
+		changedFieldIds: createChangedFieldIdsAtom(),
 		fieldUpdates$: null,
 		itemMeta: { sourceMap: null },
 		originalValues: {},
@@ -82,8 +84,8 @@ function Harness(props: { validity: FieldValidityState; messages: Record<string,
 		Provider,
 		{ store },
 		React.createElement(
-			IntlProvider,
-			{ locale: 'en', messages: props.messages, onError: () => undefined },
+			RawIntlProvider,
+			{ value: createTestIntl({ messages: props.messages }) },
 			React.createElement(
 				StableGlobalContext.Provider,
 				{ value: { formsStackData: [], api: {} } },
