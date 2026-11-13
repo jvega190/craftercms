@@ -168,7 +168,6 @@ public class SitesServiceInternalImpl implements SitesService, ApplicationContex
 	private ContentMonitor contentMonitor;
 	private final SiteBootstrapStateProvider siteBootstrapStateProvider;
 	private ApplicationContext applicationContext;
-	private ServicesConfig servicesConfig;
 	private ItemTargetDAO itemTargetDao;
 	private GeneralLockService generalLockService;
 
